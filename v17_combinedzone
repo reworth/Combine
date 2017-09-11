@@ -1,0 +1,124 @@
+#!/bin/bash
+LEN=9
+MASTER=1
+ALLSERVER=("1" "2" "3" "4" "5" "6" "7" "8" "9")
+DATE=`date +%Y%m%d-%H%M%S`
+ALLSERVER_LEN=${#ALLSERVER[@]}
+WHO_YOU_ARE=yunwei
+
+
+
+#~~~~~~~~~~~precheck~~~~~~~
+if [ -z $1 ]; then
+	echo "usage: $0 [yes!]"
+	exit
+fi
+
+if [ $1 != "yes!" ]; then
+	echo "require $0 yes! to confirm you really move zone!";
+	exit
+fi
+
+#判断合区个数是否一致
+if [ $LEN -ne $ALLSERVER_LEN ];then
+	echo "The length is not match!"
+	exit
+fi
+
+if [ $MASTER -ne ${ALLSERVER[0]} ]; then  ##µÚÒ»¸öÇøÊÇ·ñÒ»ÖÂ
+	echo "Error_004 !!! Unequal ! MASTER\"$MASTER\" =/= ALLSERVER[0]\"${ALLSERVER[0]}\" ";
+	exit 
+fi
+
+
+#判断xml文件是否存在
+if [ ! -f "/data/release/sg17/pi/conf/domai_config.xml" ];then
+	echo "Error:The xml file is not exist!"
+	exit
+fi
+
+#判断合区目录是否存在
+for SERVERID in ${ALLSERVER[@]}
+do
+	if [ ! -d "/data/release/sg17/s$SERVERID" ];then
+		echo "Error! The Zone s$SERVERID not be found!"
+		exit
+	fi
+done
+#判断备份目录是否存在
+if [ ! -d "/data/release/$WHO_YOU_ARE/tmp" ];then
+	echo "The directory /data/release/$WHO_YOU_ARE/tmp is not exsit! "
+	exit
+fi	
+
+#~~~~~~~~~~~~prompt~~~~~~~~~~~~~~~~
+echo "########################### "
+echo First ZONE:$MASTER
+echo Combin ZONE:${ALLSERVER[@]}
+echo "########################### "
+echo "Warnning: Are you sure you want to perform!! "
+read -t 30 -p "Please input Uppercase  [Y/N] :" OPTION
+if [[ $OPTION != [Y] ]];then
+	exit
+fi
+
+#~~~~~~~~~~~~backup~~~~~~~~~~~~~
+echo "copy domai_config.xml to /data/release/$WHO_YOU_ARE/tmp "
+cp /data/release/sg17/pi/conf/domai_config.xml /data/release/$WHO_YOU_ARE/tmp/domai_config.xml.bak$DATE
+
+
+#~~~~~~~~~~~~~~main~~~~~~~~~~~~~
+echo "stop warning.sh"
+cd /data/release/sg17
+mv tools/warning.sh tools/warning_b.sh
+
+for SERVERID in ${ALLSERVER[@]}
+do
+	sh /data/release/sg17/s$SERVERID/tools/stop.sh
+	echo "s$SERVERID is stop!"
+done
+
+echo "update domai_config.xml and delete hequ files"
+cp -r /data/release/sg17/$MASTER /data/release/$WHO_YOU_ARE/tmp/$MASTER-$DATE
+for SERVERID in ${ALLSERVER[@]}
+do
+	echo $SERVERID
+ 	SVALUE=`awk "/s$SERVERID.zzby.hly.com/" pi/conf/domai_config.xml | awk -F' ' '{print $3}'`
+	echo "#################"
+	echo $SVALUE
+	DVALUE=(value=\"$MASTER\")
+	echo "******************"
+	echo $DVALUE
+	#echo "111111111111111111111111"
+	sed -i "s/${SVALUE}/${DVALUE}/g" pi/conf/domai_config.xml
+ 	if [ $SERVERID != $MASTER ]
+	then
+ 		rm -rf s$SERVERID/tools/battle17_$SERVERID s$SERVERID/data/* s$SERVERID/shm/* s$SERVERID/webroot/data s$SERVERID/webroot/reserve	
+		ln -sf /data/release/sg17/s$MASTER/webroot/data /data/release/sg17/s$SERVERID/webroot/
+ 		ln -sf /data/release/sg17/s$MASTER/webroot/reserve /data/release/sg17/s$SERVERID/webroot/
+ 	fi
+ 	echo "$SERVERID is done"
+done
+echo "start s$MASTER zone !!"
+sh s$MASTER/tools/start.sh 
+sh lighttpd/killcgi.sh
+echo "start warning.sh"
+mv tools/warning_b.sh tools/warning.sh 
+
+echo "delete fuqu chat"
+cd /data/release/sg17/chat/server/
+for SERVERID in ${ALLSERVER[@]}
+do
+	if [ $SERVERID != $MASTER ]
+	then
+		if [ -e chat$SERVERID ];then
+			rm -rf /data/release/sg17/chat/server/chat$SERVERID
+			PID=`ps aux |grep chat$SERVERID |grep -v grep |awk -F' ' '{if($11=="./chat$SERVERID"){print $2}}'`
+       		kill -9 $PID
+       		echo "chat$SERVERID delete"
+       	else
+       		echo "chat$SERVERID not exit"
+       	fi
+	fi
+done
+
